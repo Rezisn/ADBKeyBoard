@@ -4,12 +4,14 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Build;
 import android.inputmethodservice.InputMethodService;
 import android.util.Base64;
 import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 
@@ -21,30 +23,55 @@ public class AdbIME extends InputMethodService {
 	private String IME_EDITORCODE = "ADB_EDITOR_CODE";
 	private String IME_MESSAGE_B64 = "ADB_INPUT_B64";
 	private String IME_CLEAR_TEXT = "ADB_CLEAR_TEXT";
+	private String IME_ACTION_SEARCH = "ADB_ACTION_SEARCH";
+	private String IME_ACTION_GO = "ADB_ACTION_GO";
+	private String IME_ACTION_DONE = "ADB_ACTION_DONE";
+	private String IME_ACTION_NEXT = "ADB_ACTION_NEXT";
+	private String IME_ACTION_SEND = "ADB_ACTION_SEND";
 	private BroadcastReceiver mReceiver = null;
 
 	@Override
-	public View onCreateInputView() {
-		View mInputView = getLayoutInflater().inflate(R.layout.view, null);
-
-		if (mReceiver == null) {
-			IntentFilter filter = new IntentFilter(IME_MESSAGE);
-			filter.addAction(IME_CHARS);
-			filter.addAction(IME_KEYCODE);
-			filter.addAction(IME_MESSAGE); // IME_META_KEYCODE // Change IME_MESSAGE to get more values.
-			filter.addAction(IME_EDITORCODE);
-			filter.addAction(IME_MESSAGE_B64);
-			filter.addAction(IME_CLEAR_TEXT);
-			mReceiver = new AdbReceiver();
-			registerReceiver(mReceiver, filter);
-		}
-
-		return mInputView;
+	public void onCreate() {
+		super.onCreate();
+		registerAdbReceiver();
 	}
 
+	private void registerAdbReceiver() {
+		if (mReceiver != null) {
+			return;
+		}
+		IntentFilter filter = new IntentFilter(IME_MESSAGE);
+		filter.addAction(IME_CHARS);
+		filter.addAction(IME_KEYCODE);
+		filter.addAction(IME_MESSAGE); // IME_META_KEYCODE // Change IME_MESSAGE to get more values.
+		filter.addAction(IME_EDITORCODE);
+		filter.addAction(IME_MESSAGE_B64);
+		filter.addAction(IME_CLEAR_TEXT);
+		filter.addAction(IME_ACTION_SEARCH);
+		filter.addAction(IME_ACTION_GO);
+		filter.addAction(IME_ACTION_DONE);
+		filter.addAction(IME_ACTION_NEXT);
+		filter.addAction(IME_ACTION_SEND);
+		mReceiver = new AdbReceiver();
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			// API 33+: required; shell/adb is another UID — must be exported.
+			registerReceiver(mReceiver, filter, Context.RECEIVER_EXPORTED);
+		} else {
+			registerReceiver(mReceiver, filter);
+		}
+	}
+
+	@Override
+	public View onCreateInputView() {
+		return getLayoutInflater().inflate(R.layout.view, null);
+	}
+
+	@Override
 	public void onDestroy() {
-		if (mReceiver != null)
+		if (mReceiver != null) {
 			unregisterReceiver(mReceiver);
+			mReceiver = null;
+		}
 		super.onDestroy();
 	}
 
@@ -153,11 +180,58 @@ public class AdbIME extends InputMethodService {
 			if (intent.getAction().equals(IME_CLEAR_TEXT)) {
 				InputConnection ic = getCurrentInputConnection();
 				if (ic != null) {
-					//REF: stackoverflow/33082004 author: Maxime Epain
-					CharSequence curPos = ic.getExtractedText(new ExtractedTextRequest(), 0).text;
-					CharSequence beforePos = ic.getTextBeforeCursor(curPos.length(), 0);
-					CharSequence afterPos = ic.getTextAfterCursor(curPos.length(), 0);
-					ic.deleteSurroundingText(beforePos.length(), afterPos.length());
+					// Try to get extracted text first
+					ExtractedTextRequest req = new ExtractedTextRequest();
+					req.hintMaxChars = 100000;
+					req.hintMaxLines = 10000;
+					android.view.inputmethod.ExtractedText et = ic.getExtractedText(req, 0);
+					if (et != null && et.text != null) {
+						CharSequence beforePos = ic.getTextBeforeCursor(et.text.length(), 0);
+						CharSequence afterPos = ic.getTextAfterCursor(et.text.length(), 0);
+						if (beforePos != null && afterPos != null) {
+							ic.deleteSurroundingText(beforePos.length(), afterPos.length());
+						}
+					} else {
+						// Fallback: select all and delete
+						ic.performContextMenuAction(android.R.id.selectAll);
+						ic.commitText("", 1);
+					}
+				}
+			}
+
+			// IME Actions - convenient shortcuts
+			if (intent.getAction().equals(IME_ACTION_SEARCH)) {
+				InputConnection ic = getCurrentInputConnection();
+				if (ic != null) {
+					ic.performEditorAction(EditorInfo.IME_ACTION_SEARCH);
+				}
+			}
+
+			if (intent.getAction().equals(IME_ACTION_GO)) {
+				InputConnection ic = getCurrentInputConnection();
+				if (ic != null) {
+					ic.performEditorAction(EditorInfo.IME_ACTION_GO);
+				}
+			}
+
+			if (intent.getAction().equals(IME_ACTION_DONE)) {
+				InputConnection ic = getCurrentInputConnection();
+				if (ic != null) {
+					ic.performEditorAction(EditorInfo.IME_ACTION_DONE);
+				}
+			}
+
+			if (intent.getAction().equals(IME_ACTION_NEXT)) {
+				InputConnection ic = getCurrentInputConnection();
+				if (ic != null) {
+					ic.performEditorAction(EditorInfo.IME_ACTION_NEXT);
+				}
+			}
+
+			if (intent.getAction().equals(IME_ACTION_SEND)) {
+				InputConnection ic = getCurrentInputConnection();
+				if (ic != null) {
+					ic.performEditorAction(EditorInfo.IME_ACTION_SEND);
 				}
 			}
 		}
